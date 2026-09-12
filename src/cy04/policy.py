@@ -60,7 +60,13 @@ class PolicyParams:
     cost_ratio_threshold: float = 2.0
 
     # L1/L3 -- rate-anomaly detection
-    absolute_rate_threshold: float = 2.5  # separates sustained-attacker (4) from all legit rates
+    absolute_rate_threshold: float = 1.8  # Phase 4 tuned (was 2.5): still comfortably above
+    # low-and-slow (1.5) and all legit baselines, but catches the
+    # sustained attacker (4.0) faster. +3.5% AttackPrevention,
+    # -0.3% LegitimateAdmission on the tuning-loop seeds; re-verified
+    # safe (zero legit BLOCKs, all attackers still escalate) across
+    # 8 seeds before adopting -- this threshold feeds the same
+    # rate_anomalous signal the block-safety guarantee depends on.
     relative_burst_multiple: float = 3.0  # fast > multiple * slow => relatively anomalous
     relative_floor: float = 1.5  # minimum-evidence gate on the relative check: a
     # "3x your own baseline" spike is only meaningful if
@@ -77,9 +83,14 @@ class PolicyParams:
     trust_gate_threshold: float = 0.5  # below this: fast-tracked for THROTTLE
 
     # L4 -- escalation ladder
-    throttle_persistence: int = 2  # consecutive anomalous seconds -> THROTTLE (rate path)
+    throttle_persistence: int = 1  # Phase 4 tuned (was 2): react to a rate anomaly one
+    # second sooner. Small, safe gain -- verified no legit BLOCKs
+    # introduced across 8 seeds.
     block_trust_ceiling: float = 0.2
-    block_persistence_fast: int = 8  # cost-ratio-flagged path (low-and-slow)
+    block_persistence_fast: int = 4  # Phase 4 tuned (was 8): the cost-ratio-flagged path is
+    # already near-zero-false-positive (Layer 2 is structural,
+    # not statistical), so there's little risk in shortening its
+    # bar to cut low-and-slow's pre-BLOCK admission window.
     block_persistence_slow: int = _MAX_LEGIT_ANOMALY_STREAK + 24  # = 90; duration-only BLOCK path.
     # Deliberately set above the longest anomalous streak a legit client can
     # physically produce (see _MAX_LEGIT_ANOMALY_STREAK), so this path is

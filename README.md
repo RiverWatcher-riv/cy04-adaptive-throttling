@@ -23,8 +23,9 @@ threat model, policy design, build phases + parameter register).
 
 ## Status
 
-**Phase 3 complete** — the five-layer policy, untuned, scores
-**92.67 / 95** with no axis left collapsed:
+**Phase 4 complete** — the five-layer policy, tuned, scores
+**93.95 / 95** (dev seed) / 93.86 average across 8 seeds, with no axis
+left collapsed:
 
 | Policy | AttackPrevention | LegitimateAdmission | OverloadFree | LegitimateBlockSafety | Weighted total |
 |---|---:|---:|---:|---:|---:|
@@ -32,13 +33,25 @@ threat model, policy design, build phases + parameter register).
 | Static threshold = 1.5 | 0.87 | 0.33 | 1.00 | 0.78 | 68.08 |
 | Static threshold = 3 | 0.44 | 0.75 | 0.06 | 0.96 | 48.89 |
 | Static threshold = 5 | 0.18 | 0.85 | 0.00 | 0.98 | 41.53 |
-| **This policy (untuned)** | **0.94** | **0.99** | **1.00** | **1.00** | **92.67** |
+| This policy, untuned (Phase 3) | 0.94 | 0.99 | 1.00 | 1.00 | 92.67 |
+| **This policy, tuned (Phase 4)** | **0.98** | **0.99** | **1.00** | **1.00** | **93.95** |
 
 The point isn't the total — it's the shape. Every naive threshold buys
-one axis by wrecking another; this buys all four at once.
+one axis by wrecking another; this buys all four at once, and Phase 4's
+tuning loop moved `AttackPrevention` further (0.94→0.98) without
+touching the other three.
+
+**Tuning found one bad lever and one good one, deliberately.** Making
+`trust_gate_threshold` far more aggressive (0.5→0.9) bought zero
+`AttackPrevention` and cost 12.7 points of `LegitimateAdmission` — a
+pure loss, kept as evidence in the Parameter Register. Lowering
+`absolute_rate_threshold` (2.5→1.8) instead bought +3.5%
+`AttackPrevention` for −0.3% `LegitimateAdmission`, re-verified safe
+across 8 seeds, and was adopted. Not every aggressive setting is
+pointed at the actual bottleneck.
 
 **No legitimate client is ever blocked**, and that holds by construction
-rather than by tuning (verified across 5 seeds):
+rather than by tuning (verified across 8 seeds, including after tuning):
 
 - The **cost-ratio BLOCK path is closed to legit traffic mathematically** —
   legit cost is exactly 1/request and the cost/rate EWMAs share a
@@ -54,7 +67,7 @@ do the real work.
 - [x] Phase 1 — Simulator
 - [x] Phase 2 — Scoring harness + naive baselines
 - [x] Phase 3 — Real policy (5 layers)
-- [ ] Phase 4 — Tuning loop
+- [x] Phase 4 — Tuning loop
 - [ ] Phase 5 — Generalization check
 - [ ] Phase 6 — Packaging, demo & submission materials
 
@@ -71,6 +84,7 @@ python scripts/phase2_report.py # score both baselines
 python scripts/phase3_report.py # verify the policy's exit checklist
 python -m cy04.run_eval                       # run the policy, print the four scores
 python scripts/phase3_incremental_scoring.py  # per-layer scoring table (build-guide requirement)
+python scripts/phase4_tuning.py               # tuning loop + tension-point analysis
 ```
 
 ## Local demo
