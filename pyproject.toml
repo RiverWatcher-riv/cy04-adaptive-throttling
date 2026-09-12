@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "CY-04 -- online, causal, class-blind adaptive API abuse throttling controller"
 requires-python = ">=3.10"
 dependencies = [
-    "numpy>=2.0",
-    "pandas>=2.2",
+    "numpy==2.5.3",
+    "pandas==3.0.5",
 ]
 
 [tool.setuptools.packages.find]
