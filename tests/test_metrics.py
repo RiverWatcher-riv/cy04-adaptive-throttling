@@ -65,6 +65,53 @@ def test_apply_actions_rejects_unknown_action():
         apply_actions(TRAFFIC, bad)
 
 
+def test_apply_actions_rejects_extraneous_action_row():
+    """A phantom (second, client_id) in `actions` that doesn't exist in
+    `traffic` must be caught, not silently dropped -- this is the
+    complementary failure mode to a missing action (e.g. a policy that
+    computed actions for the wrong client set)."""
+    extra = pd.concat(
+        [ACTIONS, pd.DataFrame([{"second": 99, "client_id": 999, "action": "BLOCK"}])],
+        ignore_index=True,
+    )
+    with pytest.raises(ValueError, match="not present in traffic"):
+        apply_actions(TRAFFIC, extra)
+
+
+def test_apply_actions_rejects_duplicate_action_row():
+    """Two actions for the same (second, client_id) must raise a clear,
+    specific error -- not an opaque pandas MergeError."""
+    dup = pd.concat(
+        [ACTIONS, pd.DataFrame([{"second": 0, "client_id": 0, "action": "BLOCK"}])],
+        ignore_index=True,
+    )
+    with pytest.raises(ValueError, match="more than one action"):
+        apply_actions(TRAFFIC, dup)
+
+
+def test_apply_actions_rejects_unknown_client_class():
+    """An unrecognized client_class must fail with a clear message at
+    the point of the actual problem, not downstream as a cryptic
+    IntCastingNaNError from an unmapped-and-NaN'd cost lookup."""
+    bad_traffic = TRAFFIC.copy()
+    bad_traffic.loc[0, "client_class"] = "mystery_class"
+    with pytest.raises(ValueError, match="unknown client_class"):
+        apply_actions(bad_traffic, ACTIONS)
+
+
+def test_apply_actions_throttle_cost_uses_class_cost_per_request():
+    """THROTTLE floors admitted *requests* to 1, then costs that one
+    request at its class's cost_per_request -- not a flat 1. This is
+    the case that matters most for low-and-slow (cost_per_request=5)."""
+    low_slow_traffic = pd.DataFrame(
+        [{"second": 0, "client_id": 5, "client_class": "low_and_slow_attacker", "requests": 4, "cost": 20}]
+    )
+    low_slow_actions = pd.DataFrame([{"second": 0, "client_id": 5, "action": "THROTTLE"}])
+    admitted = apply_actions(low_slow_traffic, low_slow_actions)
+    assert admitted.iloc[0]["admitted_requests"] == 1
+    assert admitted.iloc[0]["admitted_cost"] == 5
+
+
 def test_hand_computed_axis_values():
     admitted = apply_actions(TRAFFIC, ACTIONS)
 
@@ -167,3 +214,54 @@ def test_static_threshold_hurts_bursty_legit_specifically():
     normal_block_rate = (normal["action"] == "BLOCK").mean()
 
     assert bursty_block_rate > normal_block_rate
+
+
+# --- Multi-seed robustness + structural checks -----------------------------
+
+
+@pytest.mark.parametrize("seed", [SEED, SEED + 1, SEED + 2, 1, 42])
+def test_always_allow_overload_free_stays_near_zero_across_seeds(seed):
+    """The dev-seed finding that unthrottled traffic breaches the 220 cap
+    on ~every second isn't a dev-seed quirk -- it must hold for any seed
+    drawn from the same class-generation rules, since Phase 5's
+    generalization check depends on the underlying traffic shape being
+    stable across seeds."""
+    traffic = generate_traffic(seed)
+    s = score(traffic, always_allow(traffic))
+    assert s.overload_free < 0.05
+
+
+def test_admitted_columns_are_integer_dtype_not_float():
+    """Guards against the outer-merge-with-indicator implementation
+    upcasting requests/cost to float64 (pandas does this defensively for
+    any outer merge, whether or not this particular pair of frames
+    actually has unmatched keys) and that upcast leaking into the public
+    admitted_requests/admitted_cost columns."""
+    traffic = generate_traffic(SEED)
+    admitted = apply_actions(traffic, always_allow(traffic))
+    assert admitted["admitted_requests"].dtype == "int64"
+    assert admitted["admitted_cost"].dtype == "int64"
+
+
+def test_apply_actions_preserves_traffic_row_order():
+    traffic = generate_traffic(SEED)
+    actions = always_allow(traffic)
+    admitted = apply_actions(traffic, actions)
+    assert (admitted["second"].to_numpy() == traffic["second"].to_numpy()).all()
+    assert (admitted["client_id"].to_numpy() == traffic["client_id"].to_numpy()).all()
+
+
+def test_score_is_immutable():
+    s = score(TRAFFIC, ACTIONS)
+    with pytest.raises(Exception):
+        s.attack_prevention = 0.0  # type: ignore[misc]
+
+
+def test_empty_traffic_returns_vacuous_perfect_scores():
+    empty_traffic = TRAFFIC.iloc[0:0]
+    empty_actions = pd.DataFrame(columns=["second", "client_id", "action"])
+    admitted = apply_actions(empty_traffic, empty_actions)
+    assert attack_prevention(admitted) == 1.0
+    assert legitimate_admission(admitted) == 1.0
+    assert overload_free(admitted) == 1.0
+    assert legitimate_block_safety(admitted) == 1.0

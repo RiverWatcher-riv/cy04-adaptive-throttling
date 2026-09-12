@@ -48,24 +48,60 @@ def apply_actions(traffic: pd.DataFrame, actions: pd.DataFrame) -> pd.DataFrame:
       BLOCK    -> admit nothing
 
     Every (second, client_id) pair in `traffic` must have exactly one
-    matching row in `actions` -- a missing or duplicated action is a bug
-    in the caller (e.g. a policy that skipped a client) and is raised,
-    not silently defaulted.
+    matching row in `actions`, and `actions` must not contain any pair
+    absent from `traffic` -- a missing, duplicated, or extraneous action
+    is a bug in the caller (e.g. a policy that skipped a client, double-
+    counted one, or computed actions for the wrong client set) and is
+    raised with a clear, specific message, not silently dropped or left
+    to surface as an opaque pandas/numpy error downstream.
     """
-    merged = traffic.merge(
-        actions, on=["second", "client_id"], how="left", validate="one_to_one"
-    )
-
-    missing = merged[merged["action"].isnull()]
-    if len(missing):
+    dup_mask = actions.duplicated(subset=["second", "client_id"], keep=False)
+    if dup_mask.any():
+        dupes = actions.loc[dup_mask, ["second", "client_id"]].drop_duplicates()
         raise ValueError(
-            f"{len(missing)} (second, client_id) rows have no assigned action "
-            f"(e.g. second={missing.iloc[0]['second']}, client_id={missing.iloc[0]['client_id']})"
+            f"{len(dupes)} (second, client_id) pair(s) have more than one action "
+            f"assigned (e.g. {dupes.iloc[0].to_dict()})"
         )
 
-    bad_actions = set(merged["action"].unique()) - set(ACTIONS)
+    # Single outer merge, vectorized: the `_merge` indicator does the
+    # missing/extra key-set check without materializing Python-level sets
+    # of tuples (which, on a 120k-row traffic table, cost ~300ms and
+    # dominated apply_actions's runtime). Once validated, this same merge
+    # result -- not a second merge -- is reused for the actual computation.
+    merged = traffic.merge(
+        actions, on=["second", "client_id"], how="outer", indicator=True
+    )
+
+    missing_mask = merged["_merge"] == "left_only"
+    if missing_mask.any():
+        sample = list(
+            merged.loc[missing_mask, ["second", "client_id"]].head(3).itertuples(index=False, name=None)
+        )
+        raise ValueError(
+            f"{int(missing_mask.sum())} (second, client_id) row(s) in traffic have no "
+            f"assigned action (e.g. {sample})"
+        )
+
+    extra_mask = merged["_merge"] == "right_only"
+    if extra_mask.any():
+        sample = list(
+            merged.loc[extra_mask, ["second", "client_id"]].head(3).itertuples(index=False, name=None)
+        )
+        raise ValueError(
+            f"actions table has {int(extra_mask.sum())} (second, client_id) pair(s) not "
+            f"present in traffic (e.g. {sample}) -- likely a policy bug (wrong "
+            f"client set or a stale second)"
+        )
+
+    merged = merged.drop(columns="_merge")
+
+    bad_actions = set(actions["action"].unique()) - set(ACTIONS)
     if bad_actions:
         raise ValueError(f"unknown action(s) in actions table: {sorted(bad_actions)}")
+
+    unknown_classes = set(traffic["client_class"].unique()) - set(_COST_PER_REQUEST_BY_VALUE)
+    if unknown_classes:
+        raise ValueError(f"unknown client_class value(s) in traffic: {sorted(unknown_classes)}")
 
     cost_per_request = merged["client_class"].map(_COST_PER_REQUEST_BY_VALUE)
 
