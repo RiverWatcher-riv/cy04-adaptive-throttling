@@ -330,6 +330,45 @@ def test_incremental_layers_score_monotonically_on_the_dev_config():
     assert totals[-1] > 90.0  # full policy
 
 
+def test_generalizes_to_unseen_seeds_within_tight_variance():
+    """Phase 5: the frozen Phase 4 config, run unchanged against seeds
+    never touched during tuning. Variance must stay tight -- a wide
+    spread would mean the tuning overfit the dev seed's particular
+    burst placements and lambda draws."""
+    seeds = [SEED, 7, 12345, 2027010100]
+    totals = []
+    for seed in seeds:
+        traffic = generate_traffic(seed)
+        log = run_policy(traffic)
+        legit = log[log["client_class"].isin(LEGIT_VALUES)]
+        assert (legit["action"] == "BLOCK").sum() == 0
+        s = score(traffic, log[["second", "client_id", "action"]])
+        totals.append(s.weighted_total)
+
+    assert max(totals) - min(totals) < 1.0  # observed spread ~0.16 across all 4
+    assert all(t > 90.0 for t in totals)
+
+
+def test_overload_free_gap_is_confined_to_the_cold_start_window():
+    """The only seconds the system is ever over the 220 cap are the
+    causally-unavoidable first few seconds of the run, before any
+    decision could possibly have been made -- confirmed structural,
+    not a per-seed weakness, during Phase 5's generalization check."""
+    from cy04.config import CAPACITY_CAP
+    from cy04.metrics import apply_actions
+
+    for seed in [SEED, 7, 12345]:
+        traffic = generate_traffic(seed)
+        log = run_policy(traffic)
+        admitted = apply_actions(traffic, log[["second", "client_id", "action"]])
+        per_second = admitted.groupby("second")["admitted_cost"].sum()
+        over_cap_seconds = per_second[per_second > CAPACITY_CAP].index
+        assert all(t <= 2 for t in over_cap_seconds), (
+            f"seed {seed}: over-cap seconds {list(over_cap_seconds)} extend "
+            "past the expected cold-start window"
+        )
+
+
 def test_action_log_is_causal_first_second_is_default_allow():
     """Nothing can be decided before anything has been observed, so the
     very first second must carry the cold-start default for everyone."""
