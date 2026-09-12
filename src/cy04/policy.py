@@ -213,13 +213,41 @@ def update_trust_and_persistence(state: ClientState, params: PolicyParams) -> No
 # --- L4: escalation ladder -------------------------------------------------
 
 
-def decide_action(state: ClientState, params: PolicyParams) -> str:
+def decide_action(state: ClientState, params: PolicyParams, max_layer: int = 5) -> str:
     """The action to apply starting next second, from signals observed
     through this second. Stateless given current signals -- this is
     what gives decay-back to ALLOW "for free": once signals normalize,
     neither escalation condition holds and the decision reverts on its
     own, with no separate cooldown state to manage.
+
+    `max_layer` gates how much of the ladder is active, so the build
+    guide's step-by-step incremental scoring (Phase 3, steps 1-5) can
+    be run against genuine partial configurations instead of being
+    reconstructed after the fact from the finished policy:
+
+      1 -- signals only, no decision logic at all (always ALLOW)
+      2 -- cost-ratio detector only (the L2 headline feature, isolated)
+      3 -- + trust/persistence-gated rate anomaly (THROTTLE only, no BLOCK)
+      4 -- + the full escalation ladder, BLOCK included (this function's
+           complete logic)
+      5 -- L4 unchanged; the capacity guard is a separate system-level
+           pass applied in run_eval.py, not part of this function
     """
+    if max_layer < 2:
+        return "ALLOW"
+
+    if max_layer == 2:
+        return "THROTTLE" if state.cost_ratio_flagged else "ALLOW"
+
+    rate_escalate = (
+        state.persistence_counter >= params.throttle_persistence
+        and state.trust < params.trust_gate_threshold
+    )
+    throttle_eligible = state.cost_ratio_flagged or rate_escalate
+
+    if max_layer == 3:
+        return "THROTTLE" if throttle_eligible else "ALLOW"
+
     never_established_history = state.consecutive_clean_seconds < params.block_clean_history_max
     block_eligible = (
         never_established_history
@@ -235,27 +263,30 @@ def decide_action(state: ClientState, params: PolicyParams) -> str:
     if block_eligible:
         return "BLOCK"
 
-    throttle_eligible = state.cost_ratio_flagged or (
-        state.persistence_counter >= params.throttle_persistence
-        and state.trust < params.trust_gate_threshold
-    )
     if throttle_eligible:
         return "THROTTLE"
 
     return "ALLOW"
 
 
-def step_client(state: ClientState, requests: int, cost: int, params: PolicyParams) -> None:
+def step_client(
+    state: ClientState, requests: int, cost: int, params: PolicyParams, max_layer: int = 5
+) -> None:
     """Advance one client's signal/decision state by one second's
     observation. `state.action` afterward is the decision for NEXT
     second -- the caller applies the PRE-step `state.action` value to
     THIS second's admission before calling this. See run_eval.py.
+
+    Signals (L1/L2/L3) are always updated in full regardless of
+    `max_layer` -- only the decision at the end is gated. This matches
+    Phase 3 step 1's intent: "log signals, make no decision yet" is a
+    property of the ACTION, not of whether the signals themselves exist.
     """
     update_signals(state, requests, cost, params)
     update_cost_ratio(state, params)
     update_rate_anomaly(state, params)
     update_trust_and_persistence(state, params)
-    state.action = decide_action(state, params)
+    state.action = decide_action(state, params, max_layer=max_layer)
 
 
 # --- L5: capacity guard (system-level, spans all clients) ------------------

@@ -33,13 +33,21 @@ from cy04.policy import ClientState, PolicyParams, apply_capacity_guard, new_sta
 from cy04.simulator import generate_traffic
 
 
-def run_policy(traffic: pd.DataFrame, params: PolicyParams | None = None) -> pd.DataFrame:
+def run_policy(
+    traffic: pd.DataFrame, params: PolicyParams | None = None, max_layer: int = 5
+) -> pd.DataFrame:
     """Run the causal policy loop over `traffic`.
 
     Returns an action log: one row per (second, client_id) giving the
     action APPLIED during that second, alongside the signal values that
     were in effect when it was decided -- the per-decision "why" that
     Phase 6's error analysis and demo depend on.
+
+    `max_layer` (1-5) runs a genuine partial configuration rather than
+    the full policy -- see decide_action()'s docstring for what each
+    level activates. Layer 5 (the capacity guard) is a separate,
+    system-level pass below and is skipped entirely for max_layer < 5,
+    exactly as the build guide's Phase 3 step-by-step scoring requires.
     """
     params = params or PolicyParams()
 
@@ -77,13 +85,14 @@ def run_policy(traffic: pd.DataFrame, params: PolicyParams | None = None) -> pd.
 
         # 2. Observe second t, update signals, decide provisional next action.
         for row in sec_df.itertuples(index=False):
-            step_client(states[row.client_id], row.requests, row.cost, params)
+            step_client(states[row.client_id], row.requests, row.cost, params, max_layer=max_layer)
 
-        # 3. Capacity guard over the provisional next actions.
-        provisional = {cid: st.action for cid, st in states.items()}
-        final_next = apply_capacity_guard(provisional, states, params)
-        for cid, action in final_next.items():
-            states[cid].action = action
+        # 3. Capacity guard over the provisional next actions (layer 5 only).
+        if max_layer >= 5:
+            provisional = {cid: st.action for cid, st in states.items()}
+            final_next = apply_capacity_guard(provisional, states, params)
+            for cid, action in final_next.items():
+                states[cid].action = action
 
     return pd.DataFrame(rows)
 

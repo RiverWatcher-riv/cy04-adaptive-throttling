@@ -69,7 +69,8 @@ pytest                          # run the test suite
 python scripts/phase1_report.py # sanity-check the traffic generator
 python scripts/phase2_report.py # score both baselines
 python scripts/phase3_report.py # verify the policy's exit checklist
-python -m cy04.run_eval         # run the policy, print the four scores
+python -m cy04.run_eval                       # run the policy, print the four scores
+python scripts/phase3_incremental_scoring.py  # per-layer scoring table (build-guide requirement)
 ```
 
 ## Local demo
