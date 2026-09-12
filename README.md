@@ -77,6 +77,7 @@ layers 1–4 do the real work.
 
 - [`docs/POLICY_EXPLANATION.md`](docs/POLICY_EXPLANATION.md) — the one-paragraph explainer, expanded per layer, each claim citing a measured number
 - [`docs/ERROR_ANALYSIS.md`](docs/ERROR_ANALYSIS.md) — the known cold-start weak point, the back-to-back-burst finding, the `OverloadFree` cold-start confinement, and the 3 real bugs found and fixed during QA
+- [`docs/BUILD_JOURNEY.md`](docs/BUILD_JOURNEY.md) — the full journey: all 8 bugs found and how they were fixed, plus every approach tried and rejected
 - [`docs/RESULTS.md`](docs/RESULTS.md) — every score, every table (Phase 2 baselines, Phase 3 incremental, Phase 4 tuning, Phase 5 generalization), and the exact script that reproduces each
 
 **Phase 5 generalization** (frozen Phase 4 config, run unchanged against 3 seeds never touched during tuning):
@@ -120,24 +121,29 @@ docker compose -f deploy/docker-compose.yml up --build
 
 Then open http://localhost:8501. See [`deploy/README.md`](deploy/README.md).
 
-This is an **exploration dashboard, not a scripted pitch** — a time
-scrubber, a sortable/filterable table of all 200 clients, a rate-vs-
-cost-per-request map (colorable by policy action or true class), a
-click-to-inspect deep dive showing any one client's entire 600-second
-trace, and the four score formulas evaluated live with their inputs
-shown, not just the output number. There's no rehearsed sequence —
-every number on screen is computed by the same `cy04.metrics`/
-`cy04.policy` code the tests and CLI use, so poking at it can't produce
-a number that contradicts `docs/RESULTS.md`.
+This is a **live simulation you watch run**, not a scripted pitch. Press
+Play and the 600 seconds advance in front of you — four charts grow as
+it goes (traffic by client type, system load against the 220 cost/sec
+cap, controller decisions over time, and a live rate-vs-cost scatter),
+with all four scoring axes updating continuously. Speed options include
+**1× real time** (a true 600-second run) up to 60×.
+
+Underneath, three detail tabs: every client's current state (sortable,
+filterable, with an optional true-type column the controller never
+sees), any single client's entire 600-second history, and the
+simulation setup. Every number on screen is computed by the same
+`cy04.metrics`/`cy04.policy` code the tests and CLI use, so poking at it
+can't produce a number that contradicts `docs/RESULTS.md`.
 
 Verified end-to-end via Streamlit's headless `AppTest` harness
-(`tests/test_dashboard.py`): load, every filter and control, all four
-client classes in the deep-dive, every boundary second, and the score
-at the final second matching the CLI's score exactly. **The Docker
-container build itself has not been verified in this environment** (no
-Docker-group permission here) — the Dockerfile/Compose config follows
-standard patterns and mounts the same code the tests already exercise,
-but treat the container step as unverified until run once for real.
+(`tests/test_dashboard.py`): load, Play advancing the clock, Restart
+after a manual scrub, every filter, all four client classes, every
+boundary second, and the score at the final second matching the CLI
+exactly. **The Docker container build itself has not been verified in
+this environment** (no Docker-group permission here) — the
+Dockerfile/Compose config follows standard patterns and mounts the same
+code the tests already exercise, but treat the container step as
+unverified until run once for real.
 
 ## Project structure
 
