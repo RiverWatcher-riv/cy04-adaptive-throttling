@@ -1,0 +1,10 @@
+services:
+  cy04-demo:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../src:/app/src
+      - ../demo:/app/demo
