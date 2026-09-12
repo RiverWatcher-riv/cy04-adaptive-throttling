@@ -18,8 +18,9 @@ request) becomes visible at all — its rate looks like a normal user, but
 its cost-per-request ratio cannot be produced by legitimate traffic.
 
 Full design rationale, threat model, and phase-by-phase build plan live in
-the project's Obsidian vault (five linked notes: overview, scoring model,
-threat model, policy design, build phases + parameter register).
+the project's Obsidian vault (overview, scoring model, threat model,
+policy design, technical requirements, build phases, parameter register).
+The submission-facing version of that material is in [`docs/`](docs/).
 
 ## Status
 
@@ -61,15 +62,21 @@ rather than by tuning (verified across 8 seeds, including after tuning):
   derived from config to sit above the longest anomaly a legit client can
   physically produce (all bursts back-to-back plus the EWMA decay tail).
 
-The capacity guard intervenes on 1.5% of seconds, confirming layers 1–4
-do the real work.
+The capacity guard intervenes on 2 of 600 seconds (0.33%), confirming
+layers 1–4 do the real work.
 
 - [x] Phase 1 — Simulator
 - [x] Phase 2 — Scoring harness + naive baselines
 - [x] Phase 3 — Real policy (5 layers)
 - [x] Phase 4 — Tuning loop
 - [x] Phase 5 — Generalization check
-- [ ] Phase 6 — Packaging, demo & submission materials
+- [x] Phase 6 — Packaging, demo & submission materials
+
+## Write-up
+
+- [`docs/POLICY_EXPLANATION.md`](docs/POLICY_EXPLANATION.md) — the one-paragraph explainer, expanded per layer, each claim citing a measured number
+- [`docs/ERROR_ANALYSIS.md`](docs/ERROR_ANALYSIS.md) — the known cold-start weak point, the back-to-back-burst finding, the `OverloadFree` cold-start confinement, and the 3 real bugs found and fixed during QA
+- [`docs/RESULTS.md`](docs/RESULTS.md) — every score, every table (Phase 2 baselines, Phase 3 incremental, Phase 4 tuning, Phase 5 generalization), and the exact script that reproduces each
 
 **Phase 5 generalization** (frozen Phase 4 config, run unchanged against 3 seeds never touched during tuning):
 
@@ -89,13 +96,19 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 
-pytest                          # run the test suite
+pytest                          # run the test suite (dashboard tests auto-skip)
 python scripts/phase1_report.py # sanity-check the traffic generator
 python scripts/phase2_report.py # score both baselines
 python scripts/phase3_report.py # verify the policy's exit checklist
 python -m cy04.run_eval                       # run the policy, print the four scores
 python scripts/phase3_incremental_scoring.py  # per-layer scoring table (build-guide requirement)
 python scripts/phase4_tuning.py               # tuning loop + tension-point analysis
+python scripts/phase5_generalization.py       # generalization check on unseen seeds
+python scripts/export_action_log.py           # per-decision evidence CSV, with reason codes
+
+# for the live demo dashboard (separate, optional dependency):
+pip install -r demo/requirements.txt
+streamlit run demo/dashboard.py
 ```
 
 ## Local demo
@@ -106,6 +119,21 @@ docker compose -f deploy/docker-compose.yml up --build
 
 Then open http://localhost:8501. See [`deploy/README.md`](deploy/README.md).
 
+The dashboard itself is verified end-to-end via Streamlit's headless
+`AppTest` harness (`tests/test_dashboard.py`) — load, the reveal toggle,
+the end-of-run scorecard, and both rehearsed jump-to moments all run
+with zero exceptions and the scorecard matches the CLI's score exactly.
+**The Docker container build itself has not been verified in this
+environment** (no Docker-group permission here) — the Dockerfile/Compose
+config follows standard patterns and mounts the same code the tests
+already exercise, but treat the container step as unverified until run
+once for real.
+
+**Rehearsed demo moments** (pinned to the dev seed, so they're
+reproducible every time, not dependent on RNG luck):
+- Bursty-legit burst: client 1, burst windows `[(269,289), (328,348), (505,525)]` — the "Jump: bursty-legit burst" button lands a few seconds before the first one.
+- Low-and-slow spotlight: any settled second works (flagged from early on) — the "Jump: low-and-slow spotlight" button lands at t=100.
+
 ## Project structure
 
 ```
@@ -115,11 +143,13 @@ src/cy04/
 ├── metrics.py      Phase 2 — scoring formulas
 ├── baselines.py    Phase 2 — always-ALLOW + static-threshold baselines
 ├── policy.py       Phase 3 — the 5-layer controller, one section per layer
-└── run_eval.py     Phase 3 — causal evaluation loop + action log
-tests/              pytest, one file per module
-scripts/            sanity-check / report scripts
+└── run_eval.py     Phase 3 — causal evaluation loop + action log (with reason codes)
+tests/              pytest, one file per module (dashboard tests auto-skip w/o streamlit)
+scripts/            sanity-check / report / tuning / evidence-export scripts
+docs/               the write-up: policy explanation, error analysis, results
 demo/               Streamlit live-replay dashboard
 deploy/             Docker + Compose for one-command local hosting
+artifacts/          generated evidence (gitignored — regenerate via scripts/)
 ```
 
 ## Simulation parameters

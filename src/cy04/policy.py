@@ -143,6 +143,10 @@ class ClientState:
     cost_ratio_flagged: bool = False
     rate_anomalous: bool = False
     action: str = "ALLOW"  # action currently in effect (decided from data through t-1)
+    reason: str = "cold_start_default"  # why `action` was chosen -- see decide_action().
+    # Phase 6 requirement: the action log needs a reason code per
+    # decision, not just the raw action, or the error analysis is
+    # hand-wavy instead of specific.
     warmed_up: bool = False  # see update_signals: both EWMAs are seeded from the
     # first observation rather than converging up from zero
 
@@ -224,12 +228,17 @@ def update_trust_and_persistence(state: ClientState, params: PolicyParams) -> No
 # --- L4: escalation ladder -------------------------------------------------
 
 
-def decide_action(state: ClientState, params: PolicyParams, max_layer: int = 5) -> str:
-    """The action to apply starting next second, from signals observed
-    through this second. Stateless given current signals -- this is
-    what gives decay-back to ALLOW "for free": once signals normalize,
-    neither escalation condition holds and the decision reverts on its
-    own, with no separate cooldown state to manage.
+def decide_action(state: ClientState, params: PolicyParams, max_layer: int = 5) -> tuple[str, str]:
+    """The (action, reason_code) to apply starting next second, from
+    signals observed through this second. Stateless given current
+    signals -- this is what gives decay-back to ALLOW "for free": once
+    signals normalize, neither escalation condition holds and the
+    decision reverts on its own, with no separate cooldown state to
+    manage.
+
+    The reason code is what turns the action log into evidence instead
+    of a bare trace -- it's what a per-decision "why" in the demo and
+    error analysis actually points at.
 
     `max_layer` gates how much of the ladder is active, so the build
     guide's step-by-step incremental scoring (Phase 3, steps 1-5) can
@@ -245,39 +254,44 @@ def decide_action(state: ClientState, params: PolicyParams, max_layer: int = 5) 
            pass applied in run_eval.py, not part of this function
     """
     if max_layer < 2:
-        return "ALLOW"
+        return "ALLOW", "layer1_signals_only"
 
     if max_layer == 2:
-        return "THROTTLE" if state.cost_ratio_flagged else "ALLOW"
+        if state.cost_ratio_flagged:
+            return "THROTTLE", "cost_ratio_flagged"
+        return "ALLOW", "clean"
 
     rate_escalate = (
         state.persistence_counter >= params.throttle_persistence
         and state.trust < params.trust_gate_threshold
     )
     throttle_eligible = state.cost_ratio_flagged or rate_escalate
+    throttle_reason = "cost_ratio_flagged" if state.cost_ratio_flagged else "sustained_rate_anomaly_low_trust"
 
     if max_layer == 3:
-        return "THROTTLE" if throttle_eligible else "ALLOW"
+        return ("THROTTLE", throttle_reason) if throttle_eligible else ("ALLOW", "clean")
 
     never_established_history = state.consecutive_clean_seconds < params.block_clean_history_max
-    block_eligible = (
+    fast_block = (
         never_established_history
         and state.trust < params.block_trust_ceiling
-        and (
-            (
-                state.cost_ratio_flagged
-                and state.persistence_counter >= params.block_persistence_fast
-            )
-            or (state.persistence_counter >= params.block_persistence_slow)
-        )
+        and state.cost_ratio_flagged
+        and state.persistence_counter >= params.block_persistence_fast
     )
-    if block_eligible:
-        return "BLOCK"
+    slow_block = (
+        never_established_history
+        and state.trust < params.block_trust_ceiling
+        and state.persistence_counter >= params.block_persistence_slow
+    )
+    if fast_block:
+        return "BLOCK", "block_fast_path_cost_ratio_signature"
+    if slow_block:
+        return "BLOCK", "block_slow_path_sustained_duration"
 
     if throttle_eligible:
-        return "THROTTLE"
+        return "THROTTLE", throttle_reason
 
-    return "ALLOW"
+    return "ALLOW", "clean"
 
 
 def step_client(
@@ -297,7 +311,7 @@ def step_client(
     update_cost_ratio(state, params)
     update_rate_anomaly(state, params)
     update_trust_and_persistence(state, params)
-    state.action = decide_action(state, params, max_layer=max_layer)
+    state.action, state.reason = decide_action(state, params, max_layer=max_layer)
 
 
 # --- L5: capacity guard (system-level, spans all clients) ------------------
@@ -359,5 +373,6 @@ def apply_capacity_guard(
             new_action = "BLOCK"
         total += projected_cost(cid, new_action) - projected_cost(cid, old_action)
         actions[cid] = new_action
+        states[cid].reason = "capacity_guard_override"
 
     return actions

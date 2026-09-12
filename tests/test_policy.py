@@ -86,7 +86,7 @@ def test_cost_ratio_detects_low_and_slow_signature():
 def test_clean_client_is_allowed():
     state = new_state()
     state.trust = 0.9
-    assert decide_action(state, PARAMS) == "ALLOW"
+    assert decide_action(state, PARAMS)[0] == "ALLOW"
 
 
 def test_established_client_can_never_be_blocked():
@@ -98,7 +98,7 @@ def test_established_client_can_never_be_blocked():
     state.trust = 0.0
     state.cost_ratio_flagged = True
     state.persistence_counter = 10_000
-    assert decide_action(state, PARAMS) == "THROTTLE"
+    assert decide_action(state, PARAMS)[0] == "THROTTLE"
 
 
 def test_block_requires_the_full_compound_condition():
@@ -107,15 +107,55 @@ def test_block_requires_the_full_compound_condition():
     state.trust = 0.0
     state.cost_ratio_flagged = True
     state.persistence_counter = PARAMS.block_persistence_fast
-    assert decide_action(state, PARAMS) == "BLOCK"
+    assert decide_action(state, PARAMS)[0] == "BLOCK"
 
     # any single condition relaxed must de-escalate to THROTTLE
     state.persistence_counter = PARAMS.block_persistence_fast - 1
-    assert decide_action(state, PARAMS) == "THROTTLE"
+    assert decide_action(state, PARAMS)[0] == "THROTTLE"
 
     state.persistence_counter = PARAMS.block_persistence_fast
     state.trust = PARAMS.block_trust_ceiling + 0.01
-    assert decide_action(state, PARAMS) == "THROTTLE"
+    assert decide_action(state, PARAMS)[0] == "THROTTLE"
+
+
+def test_reason_codes_distinguish_the_two_block_paths():
+    """Phase 6 requirement: the action log needs a reason code, not just
+    the raw action -- and the two BLOCK paths must be distinguishable
+    from each other, since they protect different scoring properties."""
+    state = new_state()
+    state.consecutive_clean_seconds = 0
+    state.trust = 0.0
+    state.cost_ratio_flagged = True
+    state.persistence_counter = PARAMS.block_persistence_fast
+    action, reason = decide_action(state, PARAMS)
+    assert action == "BLOCK"
+    assert reason == "block_fast_path_cost_ratio_signature"
+
+    state.cost_ratio_flagged = False  # no cost signature -- only the duration path applies
+    state.persistence_counter = PARAMS.block_persistence_slow
+    action, reason = decide_action(state, PARAMS)
+    assert action == "BLOCK"
+    assert reason == "block_slow_path_sustained_duration"
+
+
+def test_reason_code_present_for_every_row_in_a_real_run():
+    traffic = generate_traffic(SEED)
+    log = run_policy(traffic)
+    assert log["reason"].notna().all()
+    assert set(log["reason"].unique()) <= {
+        "cold_start_default",
+        "clean",
+        "cost_ratio_flagged",
+        "sustained_rate_anomaly_low_trust",
+        "block_fast_path_cost_ratio_signature",
+        "block_slow_path_sustained_duration",
+        "capacity_guard_override",
+    }
+    # every BLOCK row must carry one of the two BLOCK-specific reasons
+    blocked = log[log["action"] == "BLOCK"]
+    assert blocked["reason"].isin(
+        {"block_fast_path_cost_ratio_signature", "block_slow_path_sustained_duration", "capacity_guard_override"}
+    ).all()
 
 
 def test_block_duration_bar_exceeds_worst_case_legit_streak():
@@ -133,11 +173,11 @@ def test_decay_back_to_allow_is_automatic():
     state = new_state()
     state.trust = 0.0
     state.cost_ratio_flagged = True
-    assert decide_action(state, PARAMS) == "THROTTLE"
+    assert decide_action(state, PARAMS)[0] == "THROTTLE"
 
     state.cost_ratio_flagged = False
     state.persistence_counter = 0
-    assert decide_action(state, PARAMS) == "ALLOW"
+    assert decide_action(state, PARAMS)[0] == "ALLOW"
 
 
 def test_capacity_guard_cannot_bypass_block_immunity():

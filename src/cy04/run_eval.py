@@ -72,6 +72,7 @@ def run_policy(
                     "requests": row.requests,
                     "cost": row.cost,
                     "action": s.action,
+                    "reason": s.reason,
                     "rate_ewma_fast": s.rate_ewma_fast,
                     "rate_ewma_slow": s.rate_ewma_slow,
                     "cost_ewma": s.cost_ewma,
