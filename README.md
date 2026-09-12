@@ -23,10 +23,22 @@ threat model, policy design, build phases + parameter register).
 
 ## Status
 
-**Phase 1 complete** — traffic simulator, built and verified in isolation.
+**Phase 2 complete** — scoring harness + naive baselines confirm the
+harness scores sensibly, and reproduce the threat-model note's "no
+static threshold works" argument with real numbers:
+
+| Baseline | AttackPrevention | LegitimateAdmission | OverloadFree | LegitimateBlockSafety | Weighted total |
+|---|---:|---:|---:|---:|---:|
+| Always-ALLOW | 0.00 | 1.00 | 0.00 | 1.00 | 40.00 |
+| Static threshold = 1.5 | 0.87 | 0.33 | 1.00 | 0.78 | 68.08 |
+| Static threshold = 3 | 0.44 | 0.75 | 0.06 | 0.96 | 48.89 |
+| Static threshold = 5 | 0.18 | 0.85 | 0.00 | 0.98 | 41.53 |
+
+No single threshold scores well on more than one or two axes at once —
+the real policy's bar isn't beating the best total, it's beating the shape.
 
 - [x] Phase 1 — Simulator
-- [ ] Phase 2 — Scoring harness + naive baselines
+- [x] Phase 2 — Scoring harness + naive baselines
 - [ ] Phase 3 — Real policy (5 layers)
 - [ ] Phase 4 — Tuning loop
 - [ ] Phase 5 — Generalization check
@@ -41,6 +53,7 @@ pip install -e .
 
 pytest                          # run the test suite
 python scripts/phase1_report.py # sanity-check the traffic generator
+python scripts/phase2_report.py # score both baselines
 ```
 
 ## Local demo
@@ -57,7 +70,8 @@ Then open http://localhost:8501. See [`deploy/README.md`](deploy/README.md).
 src/cy04/
 ├── config.py       every numeric constant — single source of truth
 ├── simulator.py    Phase 1 — traffic generator
-├── metrics.py      Phase 2 — scoring formulas (not yet built)
+├── metrics.py      Phase 2 — scoring formulas
+├── baselines.py    Phase 2 — always-ALLOW + static-threshold baselines
 ├── policy.py       Phase 3 — the controller (not yet built)
 └── run_eval.py     Phase 3+ — causal evaluation loop (not yet built)
 tests/              pytest, one file per module
