@@ -120,20 +120,24 @@ docker compose -f deploy/docker-compose.yml up --build
 
 Then open http://localhost:8501. See [`deploy/README.md`](deploy/README.md).
 
-The dashboard itself is verified end-to-end via Streamlit's headless
-`AppTest` harness (`tests/test_dashboard.py`) — load, the reveal toggle,
-the end-of-run scorecard, and both rehearsed jump-to moments all run
-with zero exceptions and the scorecard matches the CLI's score exactly.
-**The Docker container build itself has not been verified in this
-environment** (no Docker-group permission here) — the Dockerfile/Compose
-config follows standard patterns and mounts the same code the tests
-already exercise, but treat the container step as unverified until run
-once for real.
+This is an **exploration dashboard, not a scripted pitch** — a time
+scrubber, a sortable/filterable table of all 200 clients, a rate-vs-
+cost-per-request map (colorable by policy action or true class), a
+click-to-inspect deep dive showing any one client's entire 600-second
+trace, and the four score formulas evaluated live with their inputs
+shown, not just the output number. There's no rehearsed sequence —
+every number on screen is computed by the same `cy04.metrics`/
+`cy04.policy` code the tests and CLI use, so poking at it can't produce
+a number that contradicts `docs/RESULTS.md`.
 
-**Rehearsed demo moments** (pinned to the dev seed, so they're
-reproducible every time, not dependent on RNG luck):
-- Bursty-legit burst: client 1, burst windows `[(269,289), (328,348), (505,525)]` — the "Jump: bursty-legit burst" button lands a few seconds before the first one.
-- Low-and-slow spotlight: any settled second works (flagged from early on) — the "Jump: low-and-slow spotlight" button lands at t=100.
+Verified end-to-end via Streamlit's headless `AppTest` harness
+(`tests/test_dashboard.py`): load, every filter and control, all four
+client classes in the deep-dive, every boundary second, and the score
+at the final second matching the CLI's score exactly. **The Docker
+container build itself has not been verified in this environment** (no
+Docker-group permission here) — the Dockerfile/Compose config follows
+standard patterns and mounts the same code the tests already exercise,
+but treat the container step as unverified until run once for real.
 
 ## Project structure
 
