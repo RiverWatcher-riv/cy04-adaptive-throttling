@@ -86,17 +86,22 @@ class PolicyParams:
     # unreachable for legit traffic by construction rather than by tuning.
     # Costs ~3% AttackPrevention vs. a bar of 30 -- measured, and accepted:
     # it converts a coincidence into a guarantee.
-    block_clean_history_max: int = 15  # a client that has EVER accumulated this many clean
-    # seconds can never be BLOCKed. This is the structural
-    # guarantee that legit clients are block-safe: the spec
-    # places every burst start at second >= 20, so every
-    # bursty-legit client banks ~20 clean seconds before its
-    # first burst, and normal-legit banks hundreds. Attackers
-    # are anomalous from their first request and never get
-    # near it. Relying on trust-decay tuning instead was
-    # fragile -- adjacent burst windows produce anomalous
-    # streaks of 40s+, long enough to decay accrued trust
-    # below the ceiling on an unlucky seed.
+    block_clean_history_max: int = 15  # a client with >= this many CONSECUTIVE clean seconds
+    # right now can never be BLOCKed. Must be consecutive, not
+    # cumulative: the spec places every burst start at second
+    # >= 20, so every bursty-legit client banks >=20 consecutive
+    # clean seconds immediately before its first burst, and
+    # normal-legit banks long consecutive runs throughout.
+    # Attackers are anomalous persistently enough that a 15-
+    # second unbroken clean streak essentially never occurs (a
+    # cumulative counter was tried first and failed: it let a
+    # sustained attacker drift past the bar from scattered
+    # clean-looking seconds caused by Poisson noise, granting
+    # permanent BLOCK immunity to specific attacker clients on
+    # 3 of 5 tested seeds). Relying on trust-decay tuning alone
+    # was also tried and also failed -- adjacent burst windows
+    # produce anomalous streaks of 40s+, long enough to decay
+    # accrued trust below the ceiling on an unlucky seed.
 
     # L5 -- capacity guard
     capacity_soft_cap: float = 0.9 * CAPACITY_CAP  # trigger margin below the hard cap
@@ -115,7 +120,14 @@ class ClientState:
     cost_ewma: float = 0.0
     trust: float = 0.0
     persistence_counter: int = 0
-    clean_seconds_total: int = 0  # cumulative, monotonic -- gates BLOCK eligibility
+    consecutive_clean_seconds: int = 0  # resets on any anomalous second -- gates BLOCK
+    # eligibility. Must be a streak, not a lifetime tally: a
+    # cumulative counter lets a sustained attacker drift past
+    # the immunity bar from scattered clean-looking seconds
+    # caused by ordinary Poisson noise, silently making that
+    # specific attacker permanently BLOCK-immune. A consecutive
+    # streak requires sustained good behavior, which is what
+    # the guarantee is actually supposed to mean.
     cost_ratio: float = 0.0
     cost_ratio_flagged: bool = False
     rate_anomalous: bool = False
@@ -191,10 +203,11 @@ def update_trust_and_persistence(state: ClientState, params: PolicyParams) -> No
     if clean:
         state.trust += params.trust_gain_rate * (1.0 - state.trust)
         state.persistence_counter = 0
-        state.clean_seconds_total += 1
+        state.consecutive_clean_seconds += 1
     else:
         state.trust *= 1.0 - params.trust_decay_rate
         state.persistence_counter += 1
+        state.consecutive_clean_seconds = 0
 
 
 # --- L4: escalation ladder -------------------------------------------------
@@ -207,7 +220,7 @@ def decide_action(state: ClientState, params: PolicyParams) -> str:
     neither escalation condition holds and the decision reverts on its
     own, with no separate cooldown state to manage.
     """
-    never_established_history = state.clean_seconds_total < params.block_clean_history_max
+    never_established_history = state.consecutive_clean_seconds < params.block_clean_history_max
     block_eligible = (
         never_established_history
         and state.trust < params.block_trust_ceiling
@@ -262,6 +275,16 @@ def apply_capacity_guard(
 
     A rare backstop by design: if this fires often, per-client
     thresholds in L1-L4 are too permissive, not this layer too weak.
+
+    Respects the same block-safety guarantee as decide_action(): a
+    client with consecutive_clean_seconds >= block_clean_history_max can
+    never be escalated to BLOCK here either. Without this check, a
+    capacity-starved second could push a THROTTLEd, history-protected
+    (e.g. legitimate, mid-burst) client straight to BLOCK on cost/trust
+    ranking alone -- a purely capacity-driven decision with no
+    persistence or trust requirement at all, silently reopening the
+    exact hole L4 was built to close. Such a client is skipped and the
+    guard looks past it to the next candidate instead.
     """
 
     def projected_cost(client_id: int, action: str) -> float:
@@ -286,7 +309,12 @@ def apply_capacity_guard(
         if total <= params.capacity_soft_cap:
             break
         old_action = actions[cid]
-        new_action = "THROTTLE" if old_action == "ALLOW" else "BLOCK"
+        if old_action == "ALLOW":
+            new_action = "THROTTLE"
+        else:
+            if states[cid].consecutive_clean_seconds >= params.block_clean_history_max:
+                continue  # history-protected: worst case is THROTTLE, try the next candidate
+            new_action = "BLOCK"
         total += projected_cost(cid, new_action) - projected_cost(cid, old_action)
         actions[cid] = new_action
 

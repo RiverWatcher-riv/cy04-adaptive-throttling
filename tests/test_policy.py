@@ -4,6 +4,7 @@ from cy04.config import BURST_COUNT, BURST_DURATION_S, SEED, ClientClass
 from cy04.metrics import score
 from cy04.policy import (
     PolicyParams,
+    apply_capacity_guard,
     decide_action,
     new_state,
     step_client,
@@ -93,7 +94,7 @@ def test_established_client_can_never_be_blocked():
     block_clean_history_max clean seconds is BLOCK-ineligible forever,
     however bad its current signals look."""
     state = new_state()
-    state.clean_seconds_total = PARAMS.block_clean_history_max
+    state.consecutive_clean_seconds = PARAMS.block_clean_history_max
     state.trust = 0.0
     state.cost_ratio_flagged = True
     state.persistence_counter = 10_000
@@ -102,7 +103,7 @@ def test_established_client_can_never_be_blocked():
 
 def test_block_requires_the_full_compound_condition():
     state = new_state()
-    state.clean_seconds_total = 0
+    state.consecutive_clean_seconds = 0
     state.trust = 0.0
     state.cost_ratio_flagged = True
     state.persistence_counter = PARAMS.block_persistence_fast
@@ -139,6 +140,56 @@ def test_decay_back_to_allow_is_automatic():
     assert decide_action(state, PARAMS) == "ALLOW"
 
 
+def test_capacity_guard_cannot_bypass_block_immunity():
+    """L5 must respect the same structural guarantee as L4: a client
+    with an established consecutive-clean streak can be pushed to
+    THROTTLE for capacity reasons, but never all the way to BLOCK. This
+    was a real gap -- the guard originally ranked purely by cost/trust
+    and could escalate a THROTTLEd, history-protected client straight
+    to BLOCK with no persistence or trust requirement at all, silently
+    reopening the hole L4 was built to close."""
+    states = {}
+    provisional = {}
+    for cid in range(3):
+        s = new_state()
+        s.warmed_up = True
+        s.consecutive_clean_seconds = PARAMS.block_clean_history_max  # immune
+        s.trust = 0.99
+        s.rate_ewma_fast = 6.0
+        s.cost_ewma = 6.0
+        s.cost_ratio = 1.0
+        states[cid] = s
+        provisional[cid] = "THROTTLE"
+
+    starved = PolicyParams(capacity_soft_cap=1.0)  # force maximum downgrade pressure
+    out = apply_capacity_guard(provisional, states, starved)
+
+    assert "BLOCK" not in out.values()
+    assert set(out.values()) <= {"THROTTLE"}
+
+
+def test_capacity_guard_can_still_block_unprotected_clients():
+    """The fix above must not neuter the guard entirely -- a client with
+    no established history is still a valid BLOCK candidate under
+    capacity pressure."""
+    states = {}
+    provisional = {}
+    for cid in range(3):
+        s = new_state()
+        s.warmed_up = True
+        s.consecutive_clean_seconds = 0  # not protected
+        s.trust = 0.0
+        s.rate_ewma_fast = 6.0
+        s.cost_ewma = 6.0
+        s.cost_ratio = 1.0
+        states[cid] = s
+        provisional[cid] = "THROTTLE"
+
+    starved = PolicyParams(capacity_soft_cap=1.0)
+    out = apply_capacity_guard(provisional, states, starved)
+    assert "BLOCK" in out.values()
+
+
 # --- Integration: the full policy against real traffic ---------------------
 
 
@@ -152,8 +203,15 @@ def test_no_legitimate_client_is_ever_blocked(seed):
     assert (legit["action"] == "BLOCK").sum() == 0
 
 
-def test_both_attacker_classes_escalate_to_block():
-    traffic = generate_traffic(SEED)
+@pytest.mark.parametrize("seed", [SEED, SEED + 1, SEED + 2, 1, 42])
+def test_both_attacker_classes_escalate_to_block(seed):
+    """Checked on 5 seeds, not just the dev seed: consecutive_clean_seconds
+    must never accidentally reach block_clean_history_max for a real
+    attacker. It did on 3/5 seeds when this counter was cumulative
+    instead of consecutive -- ordinary Poisson noise let scattered
+    clean-looking seconds add up to permanent BLOCK immunity for
+    specific sustained-attacker clients."""
+    traffic = generate_traffic(seed)
     log = run_policy(traffic)
     for cls in [ClientClass.SUSTAINED_ATTACKER.value, ClientClass.LOW_AND_SLOW_ATTACKER.value]:
         sub = log[log["client_class"] == cls]
