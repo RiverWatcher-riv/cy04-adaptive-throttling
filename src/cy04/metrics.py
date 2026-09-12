@@ -24,7 +24,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from cy04.config import ATTACKER_CLASSES, CAPACITY_CAP, COST_PER_REQUEST, LEGIT_CLASSES, ClientClass
+from cy04.config import (
+    ATTACKER_CLASSES,
+    CAPACITY_CAP,
+    COST_PER_REQUEST,
+    LEGIT_CLASSES,
+    ClientClass,
+)
 
 ACTIONS = ("ALLOW", "THROTTLE", "BLOCK")
 

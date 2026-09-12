@@ -1,3 +1,5 @@
+from itertools import pairwise
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -47,7 +49,7 @@ def test_bursty_clients_have_exactly_three_nonoverlapping_windows():
         for start, end in windows:
             assert end - start == BURST_DURATION_S
             assert low <= start <= high
-        for (_, e1), (s2, _) in zip(windows, windows[1:]):
+        for (_, e1), (s2, _) in pairwise(windows):
             assert e1 <= s2  # non-overlapping, back-to-back allowed
 
 

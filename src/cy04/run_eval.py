@@ -29,7 +29,13 @@ import pandas as pd
 
 from cy04.config import SEED
 from cy04.metrics import Score, score
-from cy04.policy import ClientState, PolicyParams, apply_capacity_guard, new_state, step_client
+from cy04.policy import (
+    ClientState,
+    PolicyParams,
+    apply_capacity_guard,
+    new_state,
+    step_client,
+)
 from cy04.simulator import generate_traffic
 
 

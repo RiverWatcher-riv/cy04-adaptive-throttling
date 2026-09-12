@@ -1,8 +1,10 @@
+from dataclasses import FrozenInstanceError
+
 import pandas as pd
 import pytest
 
-from cy04.config import SEED, ClientClass
 from cy04.baselines import always_allow, static_rate_threshold
+from cy04.config import SEED
 from cy04.metrics import (
     apply_actions,
     attack_prevention,
@@ -252,8 +254,12 @@ def test_apply_actions_preserves_traffic_row_order():
 
 
 def test_score_is_immutable():
+    """Asserts the specific FrozenInstanceError rather than a blind
+    Exception -- a bare `pytest.raises(Exception)` would also pass if
+    the assignment failed for some entirely unrelated reason, which
+    would make this test look green while proving nothing."""
     s = score(TRAFFIC, ACTIONS)
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         s.attack_prevention = 0.0  # type: ignore[misc]
 
 

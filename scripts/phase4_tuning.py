@@ -25,6 +25,20 @@ from cy04.simulator import generate_traffic
 
 CHECK_SEEDS = [SEED, SEED + 1, 42]
 
+# The tuning loop's starting point is the PHASE 3 FINAL config, pinned
+# explicitly here rather than read from PolicyParams() defaults. This
+# matters: Phase 4 adopted three of these changes INTO the defaults, so
+# reading the baseline from the defaults would make iters 4.1/4.2/4.5
+# no-ops against themselves and collapse the whole table to one
+# repeated number -- i.e. the recorded results would stop reproducing
+# from their own script. Pinning keeps this loop an honest record of
+# the search that was actually run.
+PHASE3_FINAL_PARAMS = PolicyParams(
+    absolute_rate_threshold=2.5,
+    throttle_persistence=2,
+    block_persistence_fast=8,
+)
+
 
 def run_iteration(label: str, params: PolicyParams, notes: str = "") -> dict:
     scores = []
@@ -58,8 +72,8 @@ def run_iteration(label: str, params: PolicyParams, notes: str = "") -> dict:
 def main() -> None:
     print(f"=== CY-04 Phase 4 tuning loop (avg over seeds {CHECK_SEEDS}) ===\n")
 
-    baseline = PolicyParams()
-    rows = [run_iteration("iter 4.0: current defaults (Phase 3 final)", baseline)]
+    baseline = PHASE3_FINAL_PARAMS
+    rows = [run_iteration("iter 4.0: Phase 3 final config (loop baseline)", baseline)]
 
     # --- Iter 4.1: react to the rate path faster -------------------------
     rows.append(
@@ -105,9 +119,29 @@ def main() -> None:
         )
     )
 
-    # --- Iter 4.6: final candidate, the non-regressive wins from above ----
-    final = replace(baseline, throttle_persistence=1, block_persistence_fast=4)
-    rows.append(run_iteration("iter 4.6: FINAL (4.1 + 4.2, re-confirmed)", final))
+    # --- Iter 4.6: final adopted config -- every non-regressive win above -
+    final = replace(
+        baseline, throttle_persistence=1, block_persistence_fast=4, absolute_rate_threshold=1.8
+    )
+    rows.append(run_iteration("iter 4.6: FINAL (4.1 + 4.2 + 4.5 combined)", final))
+
+    # Self-check against drift: iter 4.6 IS what ships. If someone edits
+    # PolicyParams' defaults without rerunning this loop, say so loudly
+    # rather than letting the recorded table quietly stop matching the
+    # shipped policy (exactly the failure this script was found to have
+    # during the final QA pass).
+    shipped = PolicyParams()
+    drifted = {
+        field: (getattr(final, field), getattr(shipped, field))
+        for field in vars(final)
+        if getattr(final, field) != getattr(shipped, field)
+    }
+    if drifted:
+        print("\n!! WARNING: iter 4.6 no longer matches the shipped PolicyParams defaults:")
+        for field, (loop_value, shipped_value) in drifted.items():
+            print(f"   {field}: loop={loop_value} shipped={shipped_value}")
+    else:
+        print("\n[self-check] iter 4.6 matches the shipped PolicyParams defaults exactly.")
 
     print("\n=== Tension-point analysis ===")
     d40, d44, d45 = rows[0], rows[4], rows[5]

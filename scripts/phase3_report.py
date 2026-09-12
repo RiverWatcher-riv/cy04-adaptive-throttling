@@ -8,8 +8,6 @@ capacity guard actually intervenes.
 
 from __future__ import annotations
 
-import pandas as pd
-
 from cy04.config import SEED
 from cy04.metrics import score
 from cy04.policy import PolicyParams

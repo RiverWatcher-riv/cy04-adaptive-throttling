@@ -82,7 +82,15 @@ with ctrl[3]:
     if st.button("Jump: low-and-slow spotlight"):
         st.session_state.second, st.session_state.playing = LOW_AND_SLOW_SPOTLIGHT_SECOND, False
 with ctrl[4]:
-    st.session_state.second = st.slider("Second", 0, DURATION_S - 1, st.session_state.second)
+    # Keyed widget, bound directly to session_state["second"]. Passing a
+    # positional default instead (st.slider(..., st.session_state.second))
+    # is a trap: once the user has dragged the slider, Streamlit's
+    # retained widget state wins over the new default, so Reset and the
+    # Jump buttons silently do nothing -- which is exactly the sequence a
+    # presenter performs live (scrub around, then jump to a moment).
+    # Buttons above are defined earlier in script order, so the value they
+    # write is picked up by this widget on the same rerun.
+    st.slider("Second", 0, DURATION_S - 1, key="second")
 
 reveal = st.toggle("Reveal ground-truth classes", value=False)
 

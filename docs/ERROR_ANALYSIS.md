@@ -14,7 +14,7 @@ Specific and honest, per the build guide's own instruction: state the weak point
 
 **What we found:** when a bursty-legit client's next burst starts soon after the previous one ends (the simulator permits adjacent, non-overlapping burst windows), trust hasn't recovered between them, and the second burst is measurably more throttled than an isolated one.
 
-**Measured:** for bursts starting within 30 seconds of the previous one ending, mean THROTTLE duration is 12.6 seconds (max 22) versus a mean of 1.3 seconds (max 11) for well-separated bursts — an order of magnitude difference.
+**Measured** (dev seed, final shipped parameters): for bursts starting within 30 seconds of the previous one ending, mean THROTTLE duration is **16.5 seconds** (max 27, n=13) versus a mean of **3.1 seconds** (max 12, n=137) for well-separated or first bursts — a ~5× difference. Across three seeds the pattern is identical (close mean 16.5 / max 28; far mean 3.1 / max 16).
 
 **Why this is the same root cause as #1, different trigger:** both come down to insufficient accrued trust at the moment a burst starts — #1 because the client is new, this because the client's trust was recently drained and hasn't recovered. It is not a new mechanism failing; it's the same one, under a harder version of the same condition.
 

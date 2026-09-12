@@ -43,7 +43,19 @@ Genuine partial configurations, not reconstructed after the fact:
 
 The escalation ladder (BLOCK) is the single biggest lever, by a wide margin — because BLOCK denies 100% of a client's cost/sec where THROTTLE only clips it to one request.
 
-`python scripts/phase3_incremental_scoring.py`
+The same attribution re-run against the **final shipped (Phase 4-tuned)** config, for comparison:
+
+| Step | Total | Δ |
+|---|---:|---:|
+| 1 — signals only | 40.00 | +0.00 |
+| 2 — + cost-ratio detector | 49.51 | +9.51 |
+| 3 — + trust/persistence THROTTLE | 62.45 | +12.94 |
+| 4 — + escalation ladder (BLOCK) | 93.94 | **+31.49** |
+| 5 — + capacity guard | 93.95 | +0.01 |
+
+The per-layer story is identical under both parameter sets — the escalation ladder dominates either way. One difference worth noting: the capacity guard's marginal contribution shrinks from +0.24 to **+0.01** after tuning, because layers 1-4 now catch nearly everything before it can reach the cap. That's the intended direction (the guard should be a backstop that rarely has work to do), and it matches the measured drop in its intervention rate.
+
+`python scripts/phase3_incremental_scoring.py` (prints both tables)
 
 ## Phase 4 — tuning loop
 
@@ -55,7 +67,11 @@ The escalation ladder (BLOCK) is the single biggest lever, by a wide margin — 
 | 4.3 | 4.1 + 4.2 combined | 0.946 | 0.990 | 92.72 | stacks cleanly |
 | 4.4 | `trust_gate_threshold` 0.5→**0.9** (deliberate overshoot) | 0.944 | **0.863** | 88.83 | **bad trade** — zero AttackPrevention gain, −12.7% LegitimateAdmission |
 | 4.5 | `absolute_rate_threshold` 2.5→**1.8** (deliberate overshoot) | **0.979** | 0.987 | 93.79 | **good trade** — adopted |
-| 4.6 | **Final**: 4.1 + 4.2 + 4.5, re-verified across 8 seeds | 0.980 | 0.990 | **93.95** (dev) / 93.86 (8-seed mean) | shipped |
+| 4.6 | **Final**: 4.1 + 4.2 + 4.5, re-verified across 8 seeds | 0.980 | 0.987 | **93.83** (this loop's 3-seed mean) | shipped |
+
+Three different means appear for the final config depending on the seed set, all consistent: **93.95** on the dev seed alone, **93.83** averaged over this loop's 3 check seeds, **93.86** averaged over the 8-seed safety sweep. The loop averages 3 seeds by design, so a change isn't mistaken for real improvement on the strength of one seed.
+
+Both this table and the Phase 3 one above **pin their parameter baselines explicitly in the scripts** rather than reading `PolicyParams()` defaults. That matters: Phase 4 adopted three of these changes into the defaults, so reading the baseline from the defaults would have turned iters 4.1/4.2/4.5 into no-ops against themselves and collapsed the whole table into one repeated number — the recorded results would have silently stopped reproducing from their own script. `phase4_tuning.py` now also self-checks that iter 4.6 still equals the shipped defaults and warns loudly if someone edits one without rerunning the other.
 
 **The tension-point question, answered with numbers:** does pushing `AttackPrevention` up cost `LegitimateAdmission`? Sometimes, and sometimes not — the two overshoot experiments above used the same starting point and each changed exactly one parameter. `trust_gate_threshold` bought nothing and cost a lot; `absolute_rate_threshold` bought a real gain almost for free. Not every aggressive setting is pointed at the actual bottleneck.
 
@@ -86,7 +102,8 @@ Spread across the 3 unseen seeds: 0.087 points out of 95 (0.09%). The dev seed s
 
 | Property | Result | How verified |
 |---|---|---|
-| No legitimate client ever reaches BLOCK | 0 legit BLOCK client-seconds, on every seed tested (12+ seeds across the project) | `tests/test_policy.py`, multiple adversarial + integration tests |
-| Every attacker client eventually reaches BLOCK | 30/30 sustained + 20/20 low-and-slow, on every seed tested | same |
+| No legitimate client ever reaches BLOCK | 0 legit BLOCK client-seconds across a **20-distinct-seed sweep** | `tests/test_policy.py`, multiple adversarial + integration tests |
+| Every attacker client eventually reaches BLOCK | 30/30 sustained + 20/20 low-and-slow, on all 20 seeds | same |
+| Score is stable across seeds | 20-seed range [93.70, 93.98], mean 93.87, spread 0.28 | same sweep |
 | Capacity guard is a rare backstop, not the primary mechanism | Intervenes on 2/600 seconds (0.33%), 17/120,000 client-seconds (0.014%), post-tuning | `scripts/export_action_log.py` |
 | Cost-ratio BLOCK path is closed to legit traffic mathematically | `cost_ratio` ≡ 1.0 exactly for all 3 non-attacker-signature classes; flag rate 100% low-and-slow, 0.0% everyone else | same |

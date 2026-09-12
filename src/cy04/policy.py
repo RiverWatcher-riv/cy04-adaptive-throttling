@@ -319,7 +319,7 @@ def step_client(
 
 def apply_capacity_guard(
     provisional_actions: dict[int, str],
-    states: dict[int, "ClientState"],
+    states: dict[int, ClientState],
     params: PolicyParams,
 ) -> dict[int, str]:
     """Project next-second admitted cost per client from CURRENT EWMA

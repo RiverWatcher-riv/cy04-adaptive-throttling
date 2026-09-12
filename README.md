@@ -24,9 +24,9 @@ The submission-facing version of that material is in [`docs/`](docs/).
 
 ## Status
 
-**Phase 4 complete** — the five-layer policy, tuned, scores
-**93.95 / 95** (dev seed) / 93.86 average across 8 seeds, with no axis
-left collapsed:
+**All six build phases complete.** The five-layer policy, tuned, scores
+**93.95 / 95** (dev seed) / 93.87 mean across a 20-seed sweep, with no
+axis left collapsed:
 
 | Policy | AttackPrevention | LegitimateAdmission | OverloadFree | LegitimateBlockSafety | Weighted total |
 |---|---:|---:|---:|---:|---:|
@@ -48,11 +48,12 @@ touching the other three.
 pure loss, kept as evidence in the Parameter Register. Lowering
 `absolute_rate_threshold` (2.5→1.8) instead bought +3.5%
 `AttackPrevention` for −0.3% `LegitimateAdmission`, re-verified safe
-across 8 seeds, and was adopted. Not every aggressive setting is
+across 20 seeds, and was adopted. Not every aggressive setting is
 pointed at the actual bottleneck.
 
 **No legitimate client is ever blocked**, and that holds by construction
-rather than by tuning (verified across 8 seeds, including after tuning):
+rather than by tuning (verified across a 20-distinct-seed sweep, run
+after tuning):
 
 - The **cost-ratio BLOCK path is closed to legit traffic mathematically** —
   legit cost is exactly 1/request and the cost/rate EWMAs share a

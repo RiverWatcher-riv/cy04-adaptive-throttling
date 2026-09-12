@@ -7,7 +7,6 @@ from cy04.policy import (
     apply_capacity_guard,
     decide_action,
     new_state,
-    step_client,
     update_cost_ratio,
     update_rate_anomaly,
     update_signals,
@@ -319,8 +318,8 @@ def test_bursty_legit_signal_spikes_on_schedule_and_recovers_every_burst():
 
             # A burst arriving soon after a previous one (trust hasn't
             # recovered yet) is genuinely, measurably throttled more --
-            # confirmed empirically (mean 12.6s / max 22s for gaps <30s,
-            # vs mean 1.3s / max 11s otherwise). That's a real, documented
+            # confirmed empirically (mean 16.5s / max 27s for gaps <30s,
+            # vs mean 3.1s / max 12s otherwise). That's a real, documented
             # error-analysis finding (Parameter Register note), not a
             # bug: LegitimateAdmission absorbs it, LegitimateBlockSafety
             # never does -- BLOCK is checked unconditionally above.
