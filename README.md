@@ -23,23 +23,37 @@ threat model, policy design, build phases + parameter register).
 
 ## Status
 
-**Phase 2 complete** — scoring harness + naive baselines confirm the
-harness scores sensibly, and reproduce the threat-model note's "no
-static threshold works" argument with real numbers:
+**Phase 3 complete** — the five-layer policy, untuned, scores
+**92.67 / 95** with no axis left collapsed:
 
-| Baseline | AttackPrevention | LegitimateAdmission | OverloadFree | LegitimateBlockSafety | Weighted total |
+| Policy | AttackPrevention | LegitimateAdmission | OverloadFree | LegitimateBlockSafety | Weighted total |
 |---|---:|---:|---:|---:|---:|
-| Always-ALLOW | 0.00 | 1.00 | 0.00 | 1.00 | 40.00 |
+| Always-ALLOW baseline | 0.00 | 1.00 | 0.00 | 1.00 | 40.00 |
 | Static threshold = 1.5 | 0.87 | 0.33 | 1.00 | 0.78 | 68.08 |
 | Static threshold = 3 | 0.44 | 0.75 | 0.06 | 0.96 | 48.89 |
 | Static threshold = 5 | 0.18 | 0.85 | 0.00 | 0.98 | 41.53 |
+| **This policy (untuned)** | **0.94** | **0.99** | **1.00** | **1.00** | **92.67** |
 
-No single threshold scores well on more than one or two axes at once —
-the real policy's bar isn't beating the best total, it's beating the shape.
+The point isn't the total — it's the shape. Every naive threshold buys
+one axis by wrecking another; this buys all four at once.
+
+**No legitimate client is ever blocked**, and that holds by construction
+rather than by tuning (verified across 5 seeds):
+
+- The **cost-ratio BLOCK path is closed to legit traffic mathematically** —
+  legit cost is exactly 1/request and the cost/rate EWMAs share a
+  half-life, so their ratio is exactly 1.0. Measured flag rate: 100% for
+  low-and-slow attackers, 0.0% for all three other classes.
+- The **duration BLOCK path is unreachable for legit traffic** — its bar is
+  derived from config to sit above the longest anomaly a legit client can
+  physically produce (all bursts back-to-back plus the EWMA decay tail).
+
+The capacity guard intervenes on 1.5% of seconds, confirming layers 1–4
+do the real work.
 
 - [x] Phase 1 — Simulator
 - [x] Phase 2 — Scoring harness + naive baselines
-- [ ] Phase 3 — Real policy (5 layers)
+- [x] Phase 3 — Real policy (5 layers)
 - [ ] Phase 4 — Tuning loop
 - [ ] Phase 5 — Generalization check
 - [ ] Phase 6 — Packaging, demo & submission materials
@@ -54,6 +68,8 @@ pip install -e .
 pytest                          # run the test suite
 python scripts/phase1_report.py # sanity-check the traffic generator
 python scripts/phase2_report.py # score both baselines
+python scripts/phase3_report.py # verify the policy's exit checklist
+python -m cy04.run_eval         # run the policy, print the four scores
 ```
 
 ## Local demo
@@ -72,8 +88,8 @@ src/cy04/
 ├── simulator.py    Phase 1 — traffic generator
 ├── metrics.py      Phase 2 — scoring formulas
 ├── baselines.py    Phase 2 — always-ALLOW + static-threshold baselines
-├── policy.py       Phase 3 — the controller (not yet built)
-└── run_eval.py     Phase 3+ — causal evaluation loop (not yet built)
+├── policy.py       Phase 3 — the 5-layer controller, one section per layer
+└── run_eval.py     Phase 3 — causal evaluation loop + action log
 tests/              pytest, one file per module
 scripts/            sanity-check / report scripts
 demo/               Streamlit live-replay dashboard
